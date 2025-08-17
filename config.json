@@ -1,0 +1,27 @@
+{
+  "actions": {
+    "up": {
+      "type": "folder",
+      "name": "Maybe"
+    },
+    "down": {
+      "type": "recycle",
+      "name": "Delete"
+    },
+    "left": {
+      "type": "folder",
+      "name": "Keep"
+    },
+    "right": {
+      "type": "folder",
+      "name": "Scraps"
+    }
+  },
+  "window": {
+    "fullscreen": false,
+    "background_color": "#000000",
+    "width": 1200,
+    "height": 800
+  },
+  "search_subfolders": true
+}
