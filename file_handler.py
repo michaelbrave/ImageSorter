@@ -1,7 +1,9 @@
 import os
 import shutil
+import hashlib
 from pathlib import Path
 from send2trash import send2trash
+from collections import defaultdict
 
 
 class FileHandler:
@@ -26,7 +28,8 @@ class FileHandler:
         try:
             source_path = Path(file_path)
             
-            if self.search_subfolders and source_path.parent != self.source_folder:
+            # Always move to root folder when search_subfolders is enabled
+            if self.search_subfolders:
                 destination_folder = self.source_folder / folder_name
             else:
                 destination_folder = source_path.parent / folder_name
@@ -46,8 +49,14 @@ class FileHandler:
             shutil.move(str(source_path), str(destination_path))
             return True, f"Moved to {destination_path}"
             
+        except PermissionError as e:
+            return False, f"Permission denied moving file: {source_path.name} - {e}"
+        except FileNotFoundError as e:
+            return False, f"File not found: {source_path.name} - {e}"
+        except OSError as e:
+            return False, f"OS error moving file: {source_path.name} - {e}"
         except Exception as e:
-            return False, f"Error moving file: {e}"
+            return False, f"Unexpected error moving file: {source_path.name} - {e}"
     
     def send_to_recycle(self, file_path):
         try:
@@ -55,6 +64,125 @@ class FileHandler:
             return True, "Sent to recycle bin"
         except Exception as e:
             return False, f"Error sending to recycle bin: {e}"
+    
+    def remove_empty_subfolders(self):
+        """Remove empty subfolders from the source directory"""
+        try:
+            removed_folders = []
+            
+            # Walk through all subdirectories, bottom-up to handle nested empty folders
+            for root, dirs, files in os.walk(self.source_folder, topdown=False):
+                for directory in dirs:
+                    folder_path = Path(root) / directory
+                    
+                    # Skip if this is the source folder itself
+                    if folder_path == self.source_folder:
+                        continue
+                    
+                    try:
+                        # Check if folder is empty (no files or subdirectories)
+                        if not any(folder_path.iterdir()):
+                            folder_path.rmdir()
+                            removed_folders.append(str(folder_path.relative_to(self.source_folder)))
+                    except OSError:
+                        # Folder not empty or permission issue, skip
+                        continue
+            
+            if removed_folders:
+                return True, f"Removed {len(removed_folders)} empty folders: {', '.join(removed_folders)}"
+            else:
+                return True, "No empty subfolders found to remove"
+                
+        except Exception as e:
+            return False, f"Error removing empty folders: {e}"
+    
+    def get_file_hash(self, file_path):
+        """Calculate MD5 hash of a file"""
+        hash_md5 = hashlib.md5()
+        try:
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+            return hash_md5.hexdigest()
+        except Exception:
+            return None
+    
+    def find_duplicate_images(self):
+        """Find duplicate images in the source folder and all subfolders (always recursive)"""
+        try:
+            file_hashes = defaultdict(list)
+            all_image_files = []
+            
+            # Always get all image files including subfolders for duplicate detection
+            for file_path in self.source_folder.rglob('*'):
+                if file_path.is_file() and file_path.suffix.lower() in self.image_extensions:
+                    all_image_files.append(file_path)
+            
+            # Calculate hashes for all files
+            for file_path in all_image_files:
+                file_hash = self.get_file_hash(file_path)
+                if file_hash:
+                    file_hashes[file_hash].append(file_path)
+            
+            # Find duplicates (hashes with more than one file)
+            duplicates = {hash_val: files for hash_val, files in file_hashes.items() if len(files) > 1}
+            
+            return duplicates, len(all_image_files)
+            
+        except Exception as e:
+            return None, f"Error finding duplicates: {e}"
+    
+    def get_unique_folders(self, duplicate_files):
+        """Get list of unique folders containing duplicate files"""
+        folders = set()
+        for files in duplicate_files.values():
+            for file_path in files:
+                if file_path.parent == self.source_folder:
+                    folders.add("Main Folder")
+                else:
+                    folders.add(str(file_path.parent.relative_to(self.source_folder)))
+        return sorted(list(folders))
+    
+    def remove_duplicates(self, duplicates, folders_to_keep):
+        """Remove duplicate files, keeping only those in specified folders"""
+        try:
+            removed_files = []
+            kept_files = []
+            
+            for hash_val, files in duplicates.items():
+                files_to_keep = []
+                files_to_remove = []
+                
+                # Categorize files based on folder preference
+                for file_path in files:
+                    if file_path.parent == self.source_folder:
+                        folder_name = "Main Folder"
+                    else:
+                        folder_name = str(file_path.parent.relative_to(self.source_folder))
+                    
+                    if folder_name in folders_to_keep:
+                        files_to_keep.append(file_path)
+                    else:
+                        files_to_remove.append(file_path)
+                
+                # If no files are in keep folders, keep the first one
+                if not files_to_keep and files_to_remove:
+                    files_to_keep.append(files_to_remove.pop(0))
+                
+                # Remove duplicate files
+                for file_path in files_to_remove:
+                    try:
+                        send2trash(str(file_path))
+                        removed_files.append(file_path.name)
+                    except Exception as e:
+                        continue
+                
+                kept_files.extend([f.name for f in files_to_keep])
+            
+            return True, f"Removed {len(removed_files)} duplicate files. Kept {len(kept_files)} files."
+            
+        except Exception as e:
+            return False, f"Error removing duplicates: {e}"
     
     def process_action(self, file_path, action):
         if action["type"] == "folder":

@@ -2,19 +2,19 @@
   "actions": {
     "up": {
       "type": "folder",
-      "name": "Maybe"
+      "name": "Head"
     },
     "down": {
-      "type": "recycle",
-      "name": "Delete"
+      "type": "folder",
+      "name": "Legs"
     },
     "left": {
       "type": "folder",
-      "name": "Keep"
+      "name": "Torso"
     },
     "right": {
       "type": "folder",
-      "name": "Scraps"
+      "name": "Arms"
     }
   },
   "window": {
@@ -23,5 +23,5 @@
     "width": 1200,
     "height": 800
   },
-  "search_subfolders": true
+  "search_subfolders": false
 }

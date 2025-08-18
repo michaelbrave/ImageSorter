@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog, Menu, simpledialog
+from tkinter import messagebox, filedialog, Menu, simpledialog, ttk
 from PIL import Image, ImageTk
 import sys
 from pathlib import Path
@@ -117,6 +117,11 @@ class ImageSorter:
         
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
+        
+        # Edit menu
+        edit_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+        edit_menu.add_command(label="Find Duplicates...", command=self.find_duplicates_dialog)
     
     def open_folder_dialog(self):
         folder = filedialog.askdirectory(title="Select folder containing images")
@@ -346,6 +351,167 @@ class ImageSorter:
         
         for label in self.action_labels.values():
             label.pack_forget()
+        
+        # Add cleanup button if we used subfolders
+        if self.file_handler and self.file_handler.search_subfolders:
+            self.cleanup_button = tk.Button(
+                self.bottom_frame,
+                text="🗑️ Clean Up Empty Subfolders",
+                command=self.cleanup_empty_folders,
+                bg="#ff6b6b",
+                fg="white",
+                font=("Arial", 12, "bold"),
+                padx=20,
+                pady=10,
+                cursor="hand2"
+            )
+            self.cleanup_button.pack(pady=10)
+    
+    def cleanup_empty_folders(self):
+        """Clean up empty subfolders and update the UI"""
+        if not self.file_handler:
+            return
+            
+        success, message = self.file_handler.remove_empty_subfolders()
+        
+        if success:
+            self.status_label.config(text=message, fg="green")
+            # Hide the cleanup button after use
+            if hasattr(self, 'cleanup_button'):
+                self.cleanup_button.pack_forget()
+        else:
+            self.status_label.config(text=message, fg="red")
+    
+    def find_duplicates_dialog(self):
+        """Open dialog to find and manage duplicate files"""
+        if not self.file_handler:
+            messagebox.showwarning("No Folder", "Please select a folder first using File > Open Folder")
+            return
+        
+        # Create progress dialog
+        progress_window = tk.Toplevel(self.root)
+        progress_window.title("Finding Duplicates...")
+        progress_window.geometry("400x100")
+        progress_window.transient(self.root)
+        progress_window.grab_set()
+        
+        tk.Label(progress_window, text="Scanning files for duplicates...", font=("Arial", 12)).pack(pady=20)
+        progress_bar = ttk.Progressbar(progress_window, mode='indeterminate')
+        progress_bar.pack(pady=10, padx=20, fill='x')
+        progress_bar.start()
+        
+        # Update the UI
+        progress_window.update()
+        
+        try:
+            # Find duplicates
+            duplicates, total_files = self.file_handler.find_duplicate_images()
+            progress_bar.stop()
+            progress_window.destroy()
+            
+            if duplicates is None:
+                messagebox.showerror("Error", f"Error finding duplicates: {total_files}")
+                return
+            
+            if not duplicates:
+                messagebox.showinfo("No Duplicates", f"No duplicate images found in {total_files} files.")
+                return
+            
+            # Show duplicate management dialog
+            self.show_duplicate_management_dialog(duplicates, total_files)
+            
+        except Exception as e:
+            progress_bar.stop()
+            progress_window.destroy()
+            messagebox.showerror("Error", f"Error finding duplicates: {e}")
+    
+    def show_duplicate_management_dialog(self, duplicates, total_files):
+        """Show dialog to manage found duplicates"""
+        duplicate_count = sum(len(files) for files in duplicates.values())
+        unique_folders = self.file_handler.get_unique_folders(duplicates)
+        
+        # Create dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Manage Duplicate Files")
+        dialog.geometry("500x600")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Info label
+        info_text = f"Found {duplicate_count} duplicate files in {len(duplicates)} groups.\nTotal files scanned: {total_files}"
+        tk.Label(dialog, text=info_text, font=("Arial", 12), fg="blue").pack(pady=10)
+        
+        # Instructions
+        tk.Label(dialog, text="Select folders to KEEP files from:", font=("Arial", 11, "bold")).pack(pady=(20, 5))
+        tk.Label(dialog, text="(Duplicates from unselected folders will be deleted)", font=("Arial", 9), fg="red").pack()
+        
+        # Checkboxes for folders
+        checkbox_frame = tk.Frame(dialog)
+        checkbox_frame.pack(pady=20, padx=20, fill='both', expand=True)
+        
+        folder_vars = {}
+        for folder in unique_folders:
+            var = tk.BooleanVar(value=True)  # Default to keep all
+            folder_vars[folder] = var
+            cb = tk.Checkbutton(checkbox_frame, text=folder, variable=var, font=("Arial", 10))
+            cb.pack(anchor='w', pady=2)
+        
+        # Details section
+        details_frame = tk.LabelFrame(dialog, text="Duplicate Groups Preview", font=("Arial", 10))
+        details_frame.pack(pady=20, padx=20, fill='both', expand=True)
+        
+        # Scrollable text widget
+        text_frame = tk.Frame(details_frame)
+        text_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        text_widget = tk.Text(text_frame, height=8, font=("Arial", 9))
+        scrollbar = tk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        
+        # Show duplicate details (limited to first few groups)
+        preview_count = 0
+        for hash_val, files in list(duplicates.items())[:5]:  # Show first 5 groups
+            preview_count += 1
+            text_widget.insert(tk.END, f"Group {preview_count}:\n")
+            for file_path in files:
+                folder_name = "Main Folder" if file_path.parent == self.file_handler.source_folder else str(file_path.parent.relative_to(self.file_handler.source_folder))
+                text_widget.insert(tk.END, f"  • {file_path.name} (in {folder_name})\n")
+            text_widget.insert(tk.END, "\n")
+        
+        if len(duplicates) > 5:
+            text_widget.insert(tk.END, f"... and {len(duplicates) - 5} more duplicate groups")
+        
+        text_widget.config(state='disabled')
+        text_widget.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        # Buttons
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=20)
+        
+        def remove_duplicates():
+            selected_folders = [folder for folder, var in folder_vars.items() if var.get()]
+            if not selected_folders:
+                messagebox.showwarning("No Selection", "Please select at least one folder to keep files from.")
+                return
+            
+            result = messagebox.askyesno("Confirm Deletion", 
+                f"This will permanently delete duplicate files from folders NOT selected.\n\n"
+                f"Files will be kept from: {', '.join(selected_folders)}\n\n"
+                f"Are you sure you want to continue?")
+            
+            if result:
+                success, message = self.file_handler.remove_duplicates(duplicates, selected_folders)
+                if success:
+                    messagebox.showinfo("Success", message)
+                    dialog.destroy()
+                else:
+                    messagebox.showerror("Error", message)
+        
+        tk.Button(button_frame, text="Remove Duplicates", command=remove_duplicates, 
+                 bg="#ff4444", fg="white", font=("Arial", 11, "bold")).pack(side='left', padx=10)
+        tk.Button(button_frame, text="Cancel", command=dialog.destroy, 
+                 font=("Arial", 11)).pack(side='left', padx=10)
     
     def run(self):
         self.root.mainloop()
