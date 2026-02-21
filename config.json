@@ -2,19 +2,19 @@
   "actions": {
     "up": {
       "type": "folder",
-      "name": "Head"
+      "name": "Maybe Base"
     },
     "down": {
       "type": "folder",
-      "name": "Legs"
+      "name": "Trash"
     },
     "left": {
       "type": "folder",
-      "name": "Torso"
+      "name": "Base"
     },
     "right": {
       "type": "folder",
-      "name": "Arms"
+      "name": "Parts"
     }
   },
   "window": {

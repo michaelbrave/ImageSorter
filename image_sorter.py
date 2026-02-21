@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, filedialog, Menu, simpledialog, ttk
 from PIL import Image, ImageTk
 import sys
+import time
 from pathlib import Path
 from config_manager import ConfigManager
 from file_handler import FileHandler
@@ -29,6 +30,9 @@ class ImageSorter:
         self.file_handler = None
         self.image_files = []
         self.current_index = 0
+        
+        # Flag to prevent processing during an action
+        self.processing_action = False
         
         self.setup_ui()
         self.bind_keys()
@@ -121,6 +125,8 @@ class ImageSorter:
         # Edit menu
         edit_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Edit", menu=edit_menu)
+        edit_menu.add_command(label="Move Images to Main Folder", command=self.move_images_to_main_folder_dialog)
+        edit_menu.add_separator()
         edit_menu.add_command(label="Find Duplicates...", command=self.find_duplicates_dialog)
     
     def open_folder_dialog(self):
@@ -219,7 +225,21 @@ class ImageSorter:
             )
     
     def bind_keys(self):
-        self.root.bind('<Key>', self.handle_keypress)
+        # Bind key press and release for arrow keys
+        self.root.bind('<KeyPress-Up>', lambda e: self.handle_arrow_key('up'))
+        self.root.bind('<KeyPress-Down>', lambda e: self.handle_arrow_key('down'))
+        self.root.bind('<KeyPress-Left>', lambda e: self.handle_arrow_key('left'))
+        self.root.bind('<KeyPress-Right>', lambda e: self.handle_arrow_key('right'))
+
+        # Bind key release to reset processing flag
+        self.root.bind('<KeyRelease-Up>', self._reset_processing_flag)
+        self.root.bind('<KeyRelease-Down>', self._reset_processing_flag)
+        self.root.bind('<KeyRelease-Left>', self._reset_processing_flag)
+        self.root.bind('<KeyRelease-Right>', self._reset_processing_flag)
+
+        self.root.bind('<space>', self.handle_space_key)
+        self.root.bind('<BackSpace>', self.handle_backspace_key)
+        self.root.bind('<Escape>', lambda e: self.root.quit())
         self.root.focus_set()
     
     def on_window_resize(self, event):
@@ -232,47 +252,55 @@ class ImageSorter:
         if hasattr(self, 'image_files') and self.image_files and self.current_index < len(self.image_files):
             self.load_current_image()
     
-    def handle_keypress(self, event):
+    def handle_arrow_key(self, direction):
+        """Handle arrow key press for moving files"""
         if not self.image_files:
             return
-            
-        key_map = {
-            'Up': 'up',
-            'Down': 'down', 
-            'Left': 'left',
-            'Right': 'right'
-        }
-        
-        if event.keysym in key_map:
-            direction = key_map[event.keysym]
-            self.process_image_action(direction)
-        elif event.keysym == 'Escape':
-            self.root.quit()
-        elif event.keysym == 'space':
+
+        # Ignore if we're already processing an action
+        if self.processing_action:
+            return
+
+        # Set processing flag to prevent repeats
+        self.processing_action = True
+
+        # Process the action
+        self.process_image_action(direction)
+
+    def handle_space_key(self, _event):
+        """Handle space key for next image"""
+        if self.image_files and self.current_index < len(self.image_files) - 1:
             self.next_image()
-        elif event.keysym == 'BackSpace':
+
+    def handle_backspace_key(self, _event):
+        """Handle backspace key for previous image"""
+        if self.current_index > 0:
             self.previous_image()
+
+    def _reset_processing_flag(self, _event=None):
+        """Reset the processing flag to allow new actions"""
+        self.processing_action = False
     
     def process_image_action(self, direction):
         if not self.image_files or self.current_index >= len(self.image_files):
             return
-            
+
         current_file = self.image_files[self.current_index]
         action = self.config_manager.get_action(direction)
-        
+
         success, message = self.file_handler.process_action(current_file, action)
-        
+
         if success:
             self.image_files.pop(self.current_index)
             self.status_label.config(text=message, fg="green")
-            
+
             if self.current_index >= len(self.image_files):
                 if self.image_files:
                     self.current_index = len(self.image_files) - 1
                 else:
                     self.show_completion_message()
                     return
-            
+
             self.load_current_image()
         else:
             self.status_label.config(text=message, fg="red")
@@ -382,6 +410,36 @@ class ImageSorter:
         else:
             self.status_label.config(text=message, fg="red")
     
+    def move_images_to_main_folder_dialog(self):
+        """Move all images from subfolders to the main folder"""
+        if not self.file_handler:
+            messagebox.showwarning("No Folder", "Please select a folder first using File > Open Folder")
+            return
+
+        # Confirm with user
+        result = messagebox.askyesno(
+            "Move Images to Main Folder",
+            f"This will move all images from subfolders to:\n{self.folder_path}\n\n"
+            "Empty subfolders will be removed.\n\n"
+            "Do you want to continue?"
+        )
+
+        if not result:
+            return
+
+        # Perform the operation
+        success, message = self.file_handler.move_images_to_main_folder()
+
+        if success:
+            messagebox.showinfo("Success", message)
+            self.status_label.config(text=message, fg="green")
+            # Reload the folder to show updated file list
+            if self.folder_path:
+                self.load_folder(self.folder_path)
+        else:
+            messagebox.showerror("Error", message)
+            self.status_label.config(text=message, fg="red")
+
     def find_duplicates_dialog(self):
         """Open dialog to find and manage duplicate files"""
         if not self.file_handler:

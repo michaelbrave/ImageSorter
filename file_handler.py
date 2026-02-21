@@ -184,6 +184,62 @@ class FileHandler:
         except Exception as e:
             return False, f"Error removing duplicates: {e}"
     
+    def move_images_to_main_folder(self):
+        """Move all images from subfolders to the main source folder"""
+        try:
+            moved_count = 0
+            removed_folders = []
+
+            # Walk through all subdirectories
+            for dirpath, dirnames, filenames in os.walk(self.source_folder, topdown=False):
+                current_dir = Path(dirpath)
+
+                # Skip if this is the source folder itself
+                if current_dir == self.source_folder:
+                    continue
+
+                # Process all image files in this directory
+                for filename in filenames:
+                    if Path(filename).suffix.lower() in self.image_extensions:
+                        source = current_dir / filename
+                        destination = self.source_folder / filename
+
+                        # Handle filename conflicts
+                        if destination.exists():
+                            base_name = destination.stem
+                            extension = destination.suffix
+                            counter = 1
+                            while destination.exists():
+                                destination = self.source_folder / f"{base_name}_{counter}{extension}"
+                                counter += 1
+
+                        try:
+                            shutil.move(str(source), str(destination))
+                            moved_count += 1
+                        except Exception as e:
+                            print(f"Error moving {source}: {e}")
+                            continue
+
+                # After moving images, check if directory is empty and remove it
+                try:
+                    if not any(current_dir.iterdir()):
+                        current_dir.rmdir()
+                        removed_folders.append(str(current_dir.relative_to(self.source_folder)))
+                except OSError:
+                    # Directory not empty or permission issue, skip
+                    continue
+
+            result_message = f"Moved {moved_count} image(s) to main folder."
+            if removed_folders:
+                result_message += f"\nRemoved {len(removed_folders)} empty folder(s)."
+            elif moved_count > 0:
+                result_message += "\nSome subfolders still contain non-image files."
+
+            return True, result_message
+
+        except Exception as e:
+            return False, f"Error moving images to main folder: {e}"
+
     def process_action(self, file_path, action):
         if action["type"] == "folder":
             return self.move_to_folder(file_path, action["name"])
